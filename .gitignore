@@ -1,6 +1,8 @@
 .env
+.venv/
 data/nfl_bet.db
 data/.pp_cookie.json
+data/.pp_nfl_league_id.json
 *.xlsx
 *.xls
 *.csv
