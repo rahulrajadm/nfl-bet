@@ -11,7 +11,7 @@ Sibling project to [wnba-bet](https://github.com/rahulrajadm/wnba-bet) and [mlb-
 
 ## Live Demo
 
-🚀 **[nfl-bet.streamlit.app](https://nfl-bet.streamlit.app)** *(pending initial deploy)*
+🚀 **[bet-nfl.streamlit.app](https://bet-nfl.streamlit.app)**
 
 ---
 

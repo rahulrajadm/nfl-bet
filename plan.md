@@ -193,7 +193,7 @@ nfl-bet-app/
 
 ### Phase 6 — Deploy
 - [x] GitHub repo `nfl-bet` (public) — pushed continuously through every phase
-- [ ] Streamlit Cloud deployment — **manual step required**: Streamlit Community Cloud has no API/CLI for creating a new app; see README.md's "Deploying to Streamlit Community Cloud" section for the one-time connect steps
+- [x] Streamlit Cloud deployment — live at [bet-nfl.streamlit.app](https://bet-nfl.streamlit.app)
 - [x] Pipeline validated end-to-end against real live data at every phase (not just import-checked) — see CLAUDE.md's caveats sections for specifics; live smoke test through the remaining preseason weeks still applies once deployed
 
 ---

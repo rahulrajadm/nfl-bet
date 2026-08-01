@@ -24,4 +24,4 @@ jobs:
           playwright install --with-deps chromium
 
       - name: Visit the app
-        run: python .github/scripts/keep_alive.py https://nfl-bet.streamlit.app
+        run: python .github/scripts/keep_alive.py https://bet-nfl.streamlit.app
