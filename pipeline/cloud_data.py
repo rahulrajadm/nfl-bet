@@ -1,8 +1,17 @@
 """
 In-memory (no-SQLite) fetchers backing ui/app_cloud.py's refresh flow and
-analysis/tracking.py's grading — completed-game results and box scores from
-ESPN's unofficial API, since neither the deployed app nor the grading loop
-has a local database to draw from for "what actually happened."
+analysis/tracking.py's grading.
+
+Two different data sources for two different jobs:
+  * Completed-game results/box scores (grading, "what actually happened")
+    come from ESPN's unofficial API — same as wnba-bet's cloud_data.py.
+  * Team/player game logs for LIVE PREDICTION (fetch_team_game_logs,
+    fetch_player_game_logs) come from nfl_data_py instead, unlike wnba-bet's
+    all-ESPN cloud path: the game model needs EPA, which requires real
+    play-by-play — ESPN's public API has no equivalent, only nflverse
+    publishes it. GitHub's CDN (nfl_data_py's data source) isn't IP-blocked
+    the way stats.nba.com or PrizePicks' DataDome are, so this works the same
+    on Streamlit Cloud as it does locally.
 
 Category label mapping below is confirmed against a real completed 2025-season
 game (ESPN event 401772636, 2025-11-09) — not guessed:
@@ -10,6 +19,9 @@ game (ESPN event 401772636, 2025-11-09) — not guessed:
   rushing:   CAR, YDS, AVG, TD, LONG
   receiving: REC, YDS, AVG, TD, LONG, TGTS
 """
+import sys, os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 import requests
 from datetime import date, timedelta
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -131,6 +143,78 @@ def _fetch_all(game_ids: list[str], fetch_fn) -> pd.DataFrame:
             if df is not None and not df.empty:
                 frames.append(df)
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+# -- Live prediction data (nfl_data_py, not ESPN) -------------------------------
+
+_last_fetch_failures = 0
+
+
+# How many seasons back to probe if the most recent ones aren't published yet
+# (seen 2026-08: nflverse's player_stats release lagged schedules/pbp by a
+# full season). Keep the most recent 2 SEASONS THAT ACTUALLY HAVE DATA, not
+# the 2 most recent calendar years — those can both be empty in the offseason.
+_MAX_SEASONS_BACK = 4
+_KEEP_SEASONS = 2
+
+
+def fetch_team_game_logs() -> pd.DataFrame:
+    """In-memory team_game_logs-equivalent for the cloud app: the most recent
+    available seasons via nfl_data_py, same shape (columns, EPA split
+    pass/rush) as the SQLite table pipeline/historical.py populates locally,
+    so it drops straight into models/game.py's game_logs_df /
+    pipeline/team_metrics.py's game_logs_df parameters."""
+    global _last_fetch_failures
+    import nfl_data_py as nfl
+    from utils.dates import today_local
+    from pipeline.historical import _team_game_base_rows, _epa_by_team_game, _PLAYED_GAME_TYPES
+
+    this_year = today_local().year
+    frames = []
+    failures = 0
+    for season in range(this_year, this_year - _MAX_SEASONS_BACK, -1):
+        if len(frames) >= _KEEP_SEASONS:
+            break
+        try:
+            sched = nfl.import_schedules([season])
+            sched = sched[sched["game_type"].isin(_PLAYED_GAME_TYPES)]
+            if sched["home_score"].notna().sum() == 0:
+                continue
+            base = _team_game_base_rows(sched)
+            epa = _epa_by_team_game(season)
+            frames.append(base.merge(epa, on=["game_id", "team"], how="left"))
+        except Exception as e:
+            print(f"  cloud team logs: {season} unavailable ({e})")
+            failures += 1
+    _last_fetch_failures = failures
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def fetch_player_game_logs() -> pd.DataFrame:
+    """In-memory player_game_logs-equivalent for the cloud app: the most
+    recent available seasons via nfl_data_py, same shape as the SQLite table."""
+    global _last_fetch_failures
+    import nfl_data_py as nfl
+    from utils.dates import today_local
+    from pipeline.historical import normalize_weekly_player_df
+
+    this_year = today_local().year
+    frames = []
+    failures = 0
+    for season in range(this_year, this_year - _MAX_SEASONS_BACK, -1):
+        if len(frames) >= _KEEP_SEASONS:
+            break
+        try:
+            weekly = nfl.import_weekly_data([season])
+            if not weekly.empty:
+                frames.append(weekly)
+        except Exception as e:
+            print(f"  cloud player logs: {season} unavailable ({e})")
+            failures += 1
+    _last_fetch_failures = failures
+    if not frames:
+        return pd.DataFrame()
+    return normalize_weekly_player_df(pd.concat(frames, ignore_index=True))
 
 
 if __name__ == "__main__":

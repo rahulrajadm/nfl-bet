@@ -81,12 +81,15 @@ RUSH_DEFENSE_STATS = {"rushing_yards", "rushing_tds"}
 PACE_APPLIED_STATS = POISSON_STATS | NORMAL_STATS
 
 
-def load_player_logs() -> pd.DataFrame:
-    conn = get_conn()
-    df = pd.read_sql("SELECT * FROM player_game_logs ORDER BY season ASC, week ASC", conn)
-    conn.close()
-    if df.empty:
+def derive_prop_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Combo stats + match key, shared by load_player_logs() (SQLite path) and
+    pipeline/cloud_data.py's in-memory fetch (Streamlit Cloud has no SQLite) —
+    predict_props() also applies this to any player_logs_df passed in directly,
+    so both paths always see the same derived columns without the caller having
+    to remember to call this first."""
+    if df is None or df.empty or "rushing_tds" not in df.columns:
         return df
+    df = df.copy()
     df["rush_rec_tds"]   = df["rushing_tds"].fillna(0) + df["receiving_tds"].fillna(0)
     df["rush_rec_yards"] = df["rushing_yards"].fillna(0) + df["receiving_yards"].fillna(0)
     df["pass_rush_yards"] = df["passing_yards"].fillna(0) + df["rushing_yards"].fillna(0)
@@ -103,6 +106,13 @@ def load_player_logs() -> pd.DataFrame:
     )
     df["_name_key"] = df["player_name"].map(normalize_name)
     return df
+
+
+def load_player_logs() -> pd.DataFrame:
+    conn = get_conn()
+    df = pd.read_sql("SELECT * FROM player_game_logs ORDER BY season ASC, week ASC", conn)
+    conn.close()
+    return derive_prop_columns(df)
 
 
 def _player_rows(player_name: str, logs: pd.DataFrame) -> pd.DataFrame:
@@ -198,8 +208,8 @@ def predict_props(
     logs = player_logs_df if player_logs_df is not None else load_player_logs()
     if logs is None or (hasattr(logs, "empty") and logs.empty):
         return []
-    if "_name_key" not in logs.columns:
-        logs = logs.assign(_name_key=logs["player_name"].map(normalize_name))
+    if "_name_key" not in logs.columns or "rush_rec_tds" not in logs.columns:
+        logs = derive_prop_columns(logs)
 
     if games is None:
         from pipeline.schedule import get_week_games

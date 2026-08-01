@@ -190,35 +190,22 @@ def pull_team_stats():
     print(f"  {len(agg)} team-season rows")
 
 
-def pull_player_game_logs():
-    """Pulled one season at a time and skipped on failure — nflverse's
-    player_stats release has lagged the schedules/pbp releases by a season
-    before (seen 2026-08: 2025 schedules+pbp were live, player_stats wasn't
-    republished yet), so a single missing year must not abort the whole pull."""
-    conn = get_conn()
-    print(f"Pulling NFL player weekly stats {SEASONS[0]}-{SEASONS[-1]}...")
-    frames = []
-    for season in SEASONS:
-        try:
-            frames.append(nfl.import_weekly_data([season]))
-        except Exception as e:
-            print(f"  Warning: player weekly stats unavailable for {season}: {e}")
-    if not frames:
-        print("  No player weekly stats pulled.")
-        conn.close()
-        return
-    weekly = pd.concat(frames, ignore_index=True)
+def normalize_weekly_player_df(weekly: pd.DataFrame) -> pd.DataFrame:
+    """Shared by pull_player_game_logs() (writes to SQLite) and
+    pipeline/cloud_data.py's live in-memory fetch (Streamlit Cloud has no
+    SQLite) — same normalization, two callers.
+
+    nflverse weekly data carries BOTH "player_name" (abbreviated, "P.Mahomes")
+    and "player_display_name" (full, "Patrick Mahomes"). We want the full
+    name — PrizePicks/Underdog send full names, and utils/names.py's matching
+    needs the real surname, not an abbreviation — so the raw "player_name"
+    column is dropped before renaming, or a plain dict-based .rename() would
+    silently collide the two into one column and keep whichever pandas
+    resolves first (it kept the abbreviated one when this shipped without the
+    drop — verify with the smoke block below after any nfl_data_py upgrade).
+    """
     weekly = weekly[weekly.get("season_type", "REG") == "REG"] if "season_type" in weekly.columns else weekly
 
-    # nflverse weekly data carries BOTH "player_name" (abbreviated, "P.Mahomes")
-    # and "player_display_name" (full, "Patrick Mahomes"). We want the full
-    # name — PrizePicks/Underdog send full names, and utils/names.py's
-    # matching needs the real surname, not an abbreviation — so the raw
-    # "player_name" column is dropped before renaming, or a plain
-    # dict-based .rename() would silently collide the two into one column
-    # and keep whichever pandas resolves first (it kept the abbreviated one
-    # when this shipped without the drop — verify with the smoke block below
-    # after any nfl_data_py upgrade).
     if "player_name" in weekly.columns and "player_display_name" in weekly.columns:
         weekly = weekly.drop(columns="player_name")
 
@@ -251,7 +238,27 @@ def pull_player_game_logs():
     for col in keep:
         if col not in df.columns:
             df[col] = None
-    df = df[keep]
+    return df[keep]
+
+
+def pull_player_game_logs():
+    """Pulled one season at a time and skipped on failure — nflverse's
+    player_stats release has lagged the schedules/pbp releases by a season
+    before (seen 2026-08: 2025 schedules+pbp were live, player_stats wasn't
+    republished yet), so a single missing year must not abort the whole pull."""
+    conn = get_conn()
+    print(f"Pulling NFL player weekly stats {SEASONS[0]}-{SEASONS[-1]}...")
+    frames = []
+    for season in SEASONS:
+        try:
+            frames.append(nfl.import_weekly_data([season]))
+        except Exception as e:
+            print(f"  Warning: player weekly stats unavailable for {season}: {e}")
+    if not frames:
+        print("  No player weekly stats pulled.")
+        conn.close()
+        return
+    df = normalize_weekly_player_df(pd.concat(frames, ignore_index=True))
 
     seasons = tuple(int(s) for s in df["season"].dropna().unique())
     if seasons:
