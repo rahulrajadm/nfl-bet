@@ -2,15 +2,20 @@
 
 # TD/turnover-type props are low-count, boom-or-bust (0 or 1 most games) —
 # the highest-variance prop class, same role as wnba-bet's Steals/Blocks.
+# Sacks and Anytime TD Scorer belong here for the same reason: a pass rusher
+# or skill player scoring/sacking is a rare, lumpy event, not a steady rate.
 HIGH_VARIANCE_STATS = {
     "Pass TDs", "Passing TDs", "Pass Touchdowns",
     "Rush TDs", "Rushing TDs", "Rushing Touchdowns",
     "Receiving TDs", "Receiving Touchdowns",
     "Rush + Rec TDs", "Rushing + Receiving TDs",
+    "Anytime TD Scorer", "Anytime TD",
     "INTs Thrown", "Interceptions", "Interceptions Thrown",
+    "Sacks", "Defensive Interceptions",
 }
 MEDIUM_VARIANCE_STATS = {
     "Receptions", "Completions", "Pass Completions",
+    "Tackles", "Tackles + Assists", "Solo Tackles", "Tackles For Loss",
 }
 LOW_VARIANCE_STATS = {
     "Pass Yards", "Passing Yards",
@@ -19,6 +24,7 @@ LOW_VARIANCE_STATS = {
     "Rush + Rec Yards", "Rushing + Receiving Yards",
     "Pass + Rush Yards", "Pass + Rush + Rec Yards",
     "Fantasy Score", "Fantasy Points",
+    "Kicking Points", "FG Made", "Field Goals Made", "Extra Points Made", "PAT Made",
 }
 
 # Game pick risk profiles

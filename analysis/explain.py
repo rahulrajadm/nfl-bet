@@ -37,9 +37,15 @@ _STAT_WORDS = {
     "pass_rush_yards": {"pass", "rush", "yards", "yds"},
     "total_yards":     {"total", "yards", "yds"},
     "fantasy":         {"fantasy", "points"},
+    "kicking_points":  {"kicking", "points"},
+    "fg_made":         {"fg", "field", "goals", "made"},
+    "pat_made":        {"extra", "points", "pat"},
+    "def_sacks":       {"sacks", "sack"},
+    "def_tackles_total": {"tackles", "assists"},
+    "def_tackles_solo": {"solo", "tackles"},
 }
 
-_COMBO_COLS = {"rush_rec_tds", "rush_rec_yards", "pass_rush_yards", "total_yards"}
+_COMBO_COLS = {"rush_rec_tds", "rush_rec_yards", "pass_rush_yards", "total_yards", "def_tackles_total"}
 
 _GENERIC_TEAM_WORDS = {"new", "york", "los", "angeles", "san", "francisco",
                         "green", "bay", "tampa", "kansas", "city", "state"}
@@ -150,21 +156,30 @@ def render_prop(p: dict) -> str:
         lines.append(f"1. **Baseline** -- season average **{e['base_rate']}** over {e['n_games']} games "
                      f"(not enough recent data to weight form)")
 
-    # 2. opponent defense (EPA-based, split pass/rush -- no points-allowed
-    # proxy the way wnba-bet's LEAGUE_AVG_TEAM_PTS did)
-    if e.get("def_adj") is not None:
-        opp = e.get("opponent") or "an unresolved opponent"
-        split = e.get("def_split")
-        if split == "blend":
-            lines.append(f"2. **Opponent** -- {opp}'s pass+rush defense EPA/play blended "
-                         f"-> production scaled x{e['def_adj']:.3f}")
-        else:
-            epa = e.get("def_epa")
-            epa_str = f"{epa:.3f}" if isinstance(epa, (int, float)) else "n/a"
-            lines.append(f"2. **Opponent** -- {opp}'s {split}-defense EPA/play allowed = {epa_str} "
-                         f"-> production scaled x{e['def_adj']:.3f}")
+    # 2. opponent adjustment -- EPA-based pass/rush split for offensive stats,
+    # opponent's sacks-allowed rate for Sacks (a pass rusher's matchup is the
+    # opposing O-line, not their own team's defense), no adjustment at all
+    # for kicking/tackles (see models/props.py's SACK_ADJUSTED_STATS comment).
+    opp = e.get("opponent") or "an unresolved opponent"
+    split = e.get("def_split")
+    if split == "blend":
+        lines.append(f"2. **Opponent** -- {opp}'s pass+rush defense EPA/play blended "
+                     f"-> production scaled x{e['def_adj']:.3f}")
+    elif split == "sacks_allowed":
+        sacks = e.get("def_epa")
+        sacks_str = f"{sacks:.2f}/game" if isinstance(sacks, (int, float)) else "n/a"
+        lines.append(f"2. **Opponent** -- {opp}'s offense allows {sacks_str} sacks "
+                     f"-> production scaled x{e['def_adj']:.3f}")
+    elif split in ("pass", "rush"):
+        epa = e.get("def_epa")
+        epa_str = f"{epa:.3f}" if isinstance(epa, (int, float)) else "n/a"
+        lines.append(f"2. **Opponent** -- {opp}'s {split}-defense EPA/play allowed = {epa_str} "
+                     f"-> production scaled x{e['def_adj']:.3f}")
+    elif e.get("def_adj") is None:
+        lines.append("2. **Opponent** -- no adjustment resolved (opponent unknown)")
     else:
-        lines.append("2. **Opponent** -- no defense adjustment resolved (opponent unknown)")
+        lines.append("2. **Opponent** -- no opponent adjustment for this stat (kicking/tackles volume "
+                     "tracks pace, not opponent quality, in this model)")
 
     # 3. pace
     if e.get("pace_factor") is not None:

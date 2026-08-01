@@ -82,7 +82,7 @@ Hybrid distribution model (ported from wnba-bet's `prob_over_line`, not MLB's pu
 - Plays-per-game / pace adjustment
 
 ### Prop types covered
-Passing Yards, Passing TDs, Interceptions, Completions, Rushing Yards, Rushing TDs, Receptions, Receiving Yards, Receiving TDs, Rush+Rec Yards, Pass+Rush+Rec Yards, Fantasy Score, Kicking Points
+Passing Yards, Passing TDs, Interceptions, Completions, Rushing Yards, Rushing TDs, Receptions, Receiving Yards, Receiving TDs, Rush+Rec Yards, Pass+Rush+Rec Yards, Fantasy Score, Kicking Points, FG Made, Extra Points Made, Anytime TD Scorer, Sacks, Tackles+Assists, Solo Tackles. Deliberately not modeled: First TD Scorer (needs drive-order/game-flow modeling), 1H/1Q partial-game props, longest-play props.
 
 ---
 

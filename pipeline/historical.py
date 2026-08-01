@@ -91,9 +91,15 @@ def _epa_by_team_game(season: int) -> pd.DataFrame:
     unlocks that a box-score-only pull (like wnba-bet's) can't get: NFL team
     strength is far better captured by EPA/play than by points or yards alone.
     """
-    cols = ["game_id", "season", "week", "posteam", "defteam", "epa", "success", "play_type"]
+    cols = ["game_id", "season", "week", "posteam", "defteam", "epa", "success", "play_type", "sack"]
     pbp = nfl.import_pbp_data([season], columns=cols, downcast=True)
     plays = pbp[pbp["play_type"].isin(["pass", "run"]) & pbp["epa"].notna() & pbp["posteam"].notna()].copy()
+
+    # Sacks allowed by the offense that game — feeds the opponent-adjustment
+    # for defensive Sacks props (models/props.py): a team that gives up a lot
+    # of sacks is a softer matchup for the opposing pass rush.
+    sacks_allowed = (plays.groupby(["game_id", "posteam"])["sack"].sum()
+                           .reset_index(name="off_sacks_allowed").rename(columns={"posteam": "team"}))
 
     off = (plays.groupby(["game_id", "posteam", "play_type"])
                  .agg(epa=("epa", "mean"), success=("success", "mean"), n=("epa", "size"))
@@ -116,13 +122,14 @@ def _epa_by_team_game(season: int) -> pd.DataFrame:
     merged = (off_pass.merge(off_rush, on=["game_id", "team"], how="outer")
                        .merge(def_pass, on=["game_id", "team"], how="outer")
                        .merge(def_rush, on=["game_id", "team"], how="outer")
-                       .merge(plays_def, on=["game_id", "team"], how="left"))
+                       .merge(plays_def, on=["game_id", "team"], how="left")
+                       .merge(sacks_allowed, on=["game_id", "team"], how="left"))
     merged["off_success_rate"] = merged[["off_success_pass", "off_success_rush"]].mean(axis=1)
     merged["def_success_rate"] = merged[["def_success_pass", "def_success_rush"]].mean(axis=1)
     merged["plays_offense"] = merged[["plays_pass", "plays_rush"]].sum(axis=1)
 
     keep = ["game_id", "team", "off_epa_pass", "off_epa_rush", "def_epa_pass", "def_epa_rush",
-            "off_success_rate", "def_success_rate", "plays_offense", "plays_defense"]
+            "off_success_rate", "def_success_rate", "plays_offense", "plays_defense", "off_sacks_allowed"]
     return merged[keep]
 
 
@@ -150,7 +157,7 @@ def pull_team_game_logs(sched: pd.DataFrame):
     cols = ["game_id", "season", "week", "season_type", "date", "team", "opponent", "is_home",
             "points_for", "points_against", "result", "off_epa_pass", "off_epa_rush",
             "def_epa_pass", "def_epa_rush", "off_success_rate", "def_success_rate",
-            "plays_offense", "plays_defense", "rest_days"]
+            "plays_offense", "plays_defense", "rest_days", "off_sacks_allowed"]
     merged[cols].to_sql("team_game_logs", conn, if_exists="append", index=False)
     conn.commit()
     conn.close()
@@ -178,6 +185,7 @@ def pull_team_stats():
         off_epa_rush_pg=("off_epa_rush", "mean"),
         def_epa_pass_pg=("def_epa_pass", "mean"),
         def_epa_rush_pg=("def_epa_rush", "mean"),
+        off_sacks_allowed_pg=("off_sacks_allowed", "mean"),
     ).reset_index()
 
     seasons = tuple(int(s) for s in agg["season"].unique())
@@ -231,21 +239,88 @@ def normalize_weekly_player_df(weekly: pd.DataFrame) -> pd.DataFrame:
     df["season_type"] = "REG"
     df["game_id"] = None  # weekly data isn't keyed by game_id; joined via season/week/team downstream
 
-    keep = ["season", "week", "season_type", "game_id", "player_id", "player_name", "position",
-            "team", "opponent", "passing_yards", "passing_tds", "interceptions", "completions",
-            "attempts", "rushing_yards", "rushing_tds", "carries", "receiving_yards",
-            "receiving_tds", "receptions", "targets", "fumbles_lost", "fantasy_points"]
+    keep = PLAYER_GAME_LOG_COLS
     for col in keep:
         if col not in df.columns:
             df[col] = None
     return df[keep]
 
 
+# The full player_game_logs column set — offense, kicking, and defense are
+# three different nflverse source files unioned into one wide table (see
+# utils/db.py's schema comment), so every normalizer fills this same list,
+# leaving columns from the other two sources NULL.
+PLAYER_GAME_LOG_COLS = [
+    "season", "week", "season_type", "game_id", "player_id", "player_name", "position",
+    "team", "opponent", "passing_yards", "passing_tds", "interceptions", "completions",
+    "attempts", "rushing_yards", "rushing_tds", "carries", "receiving_yards",
+    "receiving_tds", "receptions", "targets", "fumbles_lost", "fantasy_points",
+    "fg_made", "fg_att", "fg_long", "pat_made", "pat_att",
+    "def_sacks", "def_tackles_solo", "def_tackle_assists", "def_tackles_for_loss",
+    "def_qb_hits", "def_interceptions", "def_tds",
+]
+
+
+def team_week_opponent_map_from_df(team_logs: pd.DataFrame) -> dict:
+    """{(season, week, team): opponent} from a team_game_logs-shaped
+    DataFrame — the kicking/defense nflverse files don't carry an opponent
+    column the way the main weekly player-stats release does, so it's looked
+    up here instead. Shared by pull_player_game_logs() (SQLite path) and
+    pipeline/cloud_data.py's in-memory fetch."""
+    if team_logs is None or team_logs.empty:
+        return {}
+    return {(int(r.season), int(r.week), r.team): r.opponent for r in team_logs.itertuples()}
+
+
+def _team_week_opponent_map(conn) -> dict:
+    return team_week_opponent_map_from_df(
+        pd.read_sql("SELECT season, week, team, opponent FROM team_game_logs", conn))
+
+
+def _normalize_kicking_df(kicking: pd.DataFrame, opp_map: dict) -> pd.DataFrame:
+    """Kicker stats — a separate nflverse file from the main player_stats
+    release, and NOT split by year (one file, full history)."""
+    kicking = kicking[kicking.get("season_type", "REG") == "REG"] if "season_type" in kicking.columns else kicking
+    if "player_name" in kicking.columns and "player_display_name" in kicking.columns:
+        kicking = kicking.drop(columns="player_name")
+    df = kicking.rename(columns={"player_display_name": "player_name"})
+    df["opponent"] = df.apply(lambda r: opp_map.get((int(r.season), int(r.week), r.team)), axis=1)
+    df["season_type"] = "REG"
+    df["game_id"] = None
+    for col in PLAYER_GAME_LOG_COLS:
+        if col not in df.columns:
+            df[col] = None
+    return df[PLAYER_GAME_LOG_COLS]
+
+
+def _normalize_defense_df(defense: pd.DataFrame, opp_map: dict) -> pd.DataFrame:
+    """Defensive player stats — also a separate nflverse file, also not
+    split by year. def_interceptions is deliberately distinct from
+    "interceptions" (QB interceptions thrown) — same person's a QB one week
+    and a defender never, but the column names must not collide."""
+    defense = defense[defense.get("season_type", "REG") == "REG"] if "season_type" in defense.columns else defense
+    if "player_name" in defense.columns and "player_display_name" in defense.columns:
+        defense = defense.drop(columns="player_name")
+    df = defense.rename(columns={"player_display_name": "player_name"})
+    df["opponent"] = df.apply(lambda r: opp_map.get((int(r.season), int(r.week), r.team)), axis=1)
+    df["season_type"] = "REG"
+    df["game_id"] = None
+    for col in PLAYER_GAME_LOG_COLS:
+        if col not in df.columns:
+            df[col] = None
+    return df[PLAYER_GAME_LOG_COLS]
+
+
 def pull_player_game_logs():
     """Pulled one season at a time and skipped on failure — nflverse's
     player_stats release has lagged the schedules/pbp releases by a season
     before (seen 2026-08: 2025 schedules+pbp were live, player_stats wasn't
-    republished yet), so a single missing year must not abort the whole pull."""
+    republished yet), so a single missing year must not abort the whole pull.
+
+    Offense, kicking, and defense are concatenated into ONE frame before a
+    SINGLE delete+insert — pulling them as three separate writes would have
+    each one's "DELETE WHERE season IN (...)" wipe out the other two's rows,
+    since they share the same wide table."""
     conn = get_conn()
     print(f"Pulling NFL player weekly stats {SEASONS[0]}-{SEASONS[-1]}...")
     frames = []
@@ -255,10 +330,38 @@ def pull_player_game_logs():
         except Exception as e:
             print(f"  Warning: player weekly stats unavailable for {season}: {e}")
     if not frames:
-        print("  No player weekly stats pulled.")
+        print("  No offense player weekly stats pulled.")
+        offense_df = pd.DataFrame(columns=PLAYER_GAME_LOG_COLS)
+    else:
+        offense_df = normalize_weekly_player_df(pd.concat(frames, ignore_index=True))
+
+    opp_map = _team_week_opponent_map(conn)
+
+    print("  Pulling kicking stats...")
+    try:
+        kicking_raw = pd.read_parquet(
+            "https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_kicking.parquet")
+        kicking_raw = kicking_raw[kicking_raw["season"].isin(SEASONS)]
+        kicking_df = _normalize_kicking_df(kicking_raw, opp_map) if not kicking_raw.empty else pd.DataFrame(columns=PLAYER_GAME_LOG_COLS)
+    except Exception as e:
+        print(f"  Warning: kicking stats unavailable: {e}")
+        kicking_df = pd.DataFrame(columns=PLAYER_GAME_LOG_COLS)
+
+    print("  Pulling defensive player stats...")
+    try:
+        defense_raw = pd.read_parquet(
+            "https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_def.parquet")
+        defense_raw = defense_raw[defense_raw["season"].isin(SEASONS)]
+        defense_df = _normalize_defense_df(defense_raw, opp_map) if not defense_raw.empty else pd.DataFrame(columns=PLAYER_GAME_LOG_COLS)
+    except Exception as e:
+        print(f"  Warning: defensive stats unavailable: {e}")
+        defense_df = pd.DataFrame(columns=PLAYER_GAME_LOG_COLS)
+
+    df = pd.concat([offense_df, kicking_df, defense_df], ignore_index=True)
+    if df.empty:
+        print("  No player weekly stats pulled at all.")
         conn.close()
         return
-    df = normalize_weekly_player_df(pd.concat(frames, ignore_index=True))
 
     seasons = tuple(int(s) for s in df["season"].dropna().unique())
     if seasons:
@@ -267,7 +370,7 @@ def pull_player_game_logs():
     df.to_sql("player_game_logs", conn, if_exists="append", index=False)
     conn.commit()
     conn.close()
-    print(f"  {len(df)} player-week rows")
+    print(f"  {len(offense_df)} offense + {len(kicking_df)} kicking + {len(defense_df)} defense = {len(df)} player-week rows")
 
 
 def pull_injuries():

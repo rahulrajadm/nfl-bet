@@ -43,6 +43,8 @@ LESS_MIN_LINE: dict[str, float] = {
     "Completions": 8, "Pass Completions": 8,
     "Receptions": 2.5,
     "Fantasy Score": 8, "Fantasy Points": 8,
+    "Tackles": 3, "Tackles + Assists": 3, "Solo Tackles": 1.5,
+    "Kicking Points": 3, "FG Made": 0.5, "Field Goals Made": 0.5,
 }
 
 # Minimum line for a "More" pick to be non-trivial (near-certain below this —
@@ -58,6 +60,7 @@ MORE_MIN_LINE: dict[str, float] = {
     "Completions": 3, "Pass Completions": 3,
     "Receptions": 0.5,
     "Fantasy Score": 3, "Fantasy Points": 3,
+    "Kicking Points": 1.5,
 }
 
 

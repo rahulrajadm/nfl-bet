@@ -192,29 +192,70 @@ def fetch_team_game_logs() -> pd.DataFrame:
 
 def fetch_player_game_logs() -> pd.DataFrame:
     """In-memory player_game_logs-equivalent for the cloud app: the most
-    recent available seasons via nfl_data_py, same shape as the SQLite table."""
+    recent available seasons via nfl_data_py (offense + kicking + defense,
+    same three-source union as pipeline/historical.py's SQLite path), same
+    shape as the SQLite table.
+
+    Builds its own opponent map from schedules rather than depending on
+    fetch_team_game_logs()'s output — ui/app_cloud.py runs both fetchers
+    concurrently in a ThreadPoolExecutor for speed, so team logs aren't
+    guaranteed to exist yet when this runs."""
     global _last_fetch_failures
     import nfl_data_py as nfl
     from utils.dates import today_local
-    from pipeline.historical import normalize_weekly_player_df
+    from pipeline.historical import (normalize_weekly_player_df, _normalize_kicking_df,
+                                      _normalize_defense_df, team_week_opponent_map_from_df,
+                                      _team_game_base_rows, _PLAYED_GAME_TYPES)
 
     this_year = today_local().year
-    frames = []
+    seasons_used = []
+    offense_frames = []
     failures = 0
     for season in range(this_year, this_year - _MAX_SEASONS_BACK, -1):
-        if len(frames) >= _KEEP_SEASONS:
+        if len(offense_frames) >= _KEEP_SEASONS:
             break
         try:
             weekly = nfl.import_weekly_data([season])
             if not weekly.empty:
-                frames.append(weekly)
+                offense_frames.append(weekly)
+                seasons_used.append(season)
         except Exception as e:
             print(f"  cloud player logs: {season} unavailable ({e})")
             failures += 1
     _last_fetch_failures = failures
-    if not frames:
-        return pd.DataFrame()
-    return normalize_weekly_player_df(pd.concat(frames, ignore_index=True))
+    offense_df = normalize_weekly_player_df(pd.concat(offense_frames, ignore_index=True)) if offense_frames else pd.DataFrame()
+
+    if not seasons_used:
+        return offense_df
+
+    opp_map = {}
+    for season in seasons_used:
+        try:
+            sched = nfl.import_schedules([season])
+            sched = sched[sched["game_type"].isin(_PLAYED_GAME_TYPES)]
+            opp_map.update(team_week_opponent_map_from_df(_team_game_base_rows(sched)))
+        except Exception as e:
+            print(f"  cloud player logs: opponent map for {season} unavailable ({e})")
+
+    try:
+        kicking_raw = pd.read_parquet(
+            "https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_kicking.parquet")
+        kicking_raw = kicking_raw[kicking_raw["season"].isin(seasons_used)]
+        kicking_df = _normalize_kicking_df(kicking_raw, opp_map) if not kicking_raw.empty else pd.DataFrame()
+    except Exception as e:
+        print(f"  cloud kicking logs unavailable: {e}")
+        kicking_df = pd.DataFrame()
+
+    try:
+        defense_raw = pd.read_parquet(
+            "https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_def.parquet")
+        defense_raw = defense_raw[defense_raw["season"].isin(seasons_used)]
+        defense_df = _normalize_defense_df(defense_raw, opp_map) if not defense_raw.empty else pd.DataFrame()
+    except Exception as e:
+        print(f"  cloud defense logs unavailable: {e}")
+        defense_df = pd.DataFrame()
+
+    return pd.concat([offense_df, kicking_df, defense_df], ignore_index=True)
 
 
 if __name__ == "__main__":

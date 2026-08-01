@@ -6,7 +6,9 @@ DB_PATH = os.path.join(os.path.dirname(__file__), "../data/nfl_bet.db")
 
 def get_conn():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    return sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH)
+    ensure_schema(conn)
+    return conn
 
 
 # Columns added after the original schema shipped. Existing local DBs predate
@@ -16,14 +18,36 @@ _PROP_LINE_MIGRATIONS = (
     ("allowed_direction", "TEXT"),
 )
 
+# Kicking/defensive player props + the sacks-allowed opponent-adjustment
+# metric, added after the original schema shipped.
+_TEAM_GAME_LOG_MIGRATIONS = (
+    ("off_sacks_allowed", "INTEGER"),
+)
+_TEAM_STATS_MIGRATIONS = (
+    ("off_sacks_allowed_pg", "REAL"),
+)
+_PLAYER_GAME_LOG_MIGRATIONS = (
+    ("fg_made", "REAL"), ("fg_att", "REAL"), ("fg_long", "REAL"),
+    ("pat_made", "REAL"), ("pat_att", "REAL"),
+    ("def_sacks", "REAL"), ("def_tackles_solo", "REAL"), ("def_tackle_assists", "REAL"),
+    ("def_tackles_for_loss", "REAL"), ("def_qb_hits", "REAL"),
+    ("def_interceptions", "REAL"), ("def_tds", "REAL"),
+)
+
 
 def ensure_schema(conn):
     """Additive, idempotent migrations for DBs created before newer columns existed."""
-    for col, typ in _PROP_LINE_MIGRATIONS:
-        try:
-            conn.execute(f"ALTER TABLE prop_lines ADD COLUMN {col} {typ}")
-        except sqlite3.OperationalError:
-            pass  # column already exists
+    for table, migrations in (
+        ("prop_lines", _PROP_LINE_MIGRATIONS),
+        ("team_game_logs", _TEAM_GAME_LOG_MIGRATIONS),
+        ("team_stats", _TEAM_STATS_MIGRATIONS),
+        ("player_game_logs", _PLAYER_GAME_LOG_MIGRATIONS),
+    ):
+        for col, typ in migrations:
+            try:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
+            except sqlite3.OperationalError:
+                pass  # column already exists (or table doesn't exist yet — init_db() creates it)
     conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
     conn.commit()
 
@@ -89,7 +113,8 @@ def init_db():
             def_success_rate REAL,
             plays_offense INTEGER,
             plays_defense INTEGER,
-            rest_days INTEGER
+            rest_days INTEGER,
+            off_sacks_allowed INTEGER
         );
 
         CREATE TABLE IF NOT EXISTS team_stats (
@@ -105,9 +130,16 @@ def init_db():
             off_epa_pass_pg REAL,
             off_epa_rush_pg REAL,
             def_epa_pass_pg REAL,
-            def_epa_rush_pg REAL
+            def_epa_rush_pg REAL,
+            off_sacks_allowed_pg REAL
         );
 
+        -- One row per player per week. Offense/kicking/defense are three
+        -- different nflverse source files unioned into one wide table (each
+        -- row populated by whichever source it came from, other columns
+        -- NULL) — simpler than three tables plus a merge at predict time,
+        -- and get_player_profile()/predict_props() are already generic over
+        -- "any stat column in this DataFrame."
         CREATE TABLE IF NOT EXISTS player_game_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             season INTEGER,
@@ -132,7 +164,19 @@ def init_db():
             receptions REAL,
             targets REAL,
             fumbles_lost REAL,
-            fantasy_points REAL
+            fantasy_points REAL,
+            fg_made REAL,
+            fg_att REAL,
+            fg_long REAL,
+            pat_made REAL,
+            pat_att REAL,
+            def_sacks REAL,
+            def_tackles_solo REAL,
+            def_tackle_assists REAL,
+            def_tackles_for_loss REAL,
+            def_qb_hits REAL,
+            def_interceptions REAL,
+            def_tds REAL
         );
 
         CREATE TABLE IF NOT EXISTS injuries (

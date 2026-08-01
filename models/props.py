@@ -12,7 +12,8 @@ import numpy as np
 from scipy.stats import poisson, norm
 from utils.db import get_conn
 from utils.names import normalize_name
-from pipeline.team_metrics import get_opp_def_epa, get_def_adj, get_game_pace_factor
+from pipeline.team_metrics import (get_opp_def_epa, get_def_adj, get_game_pace_factor,
+                                    get_opp_sacks_allowed, get_sacks_def_adj)
 from pipeline.team_names import to_full_name
 from analysis.ev import breakeven_prob
 
@@ -53,30 +54,58 @@ STAT_MAP = {
     "Pass + Rush + Rec Yards":     "total_yards",
     "Fantasy Score":               "fantasy",
     "Fantasy Points":              "fantasy",
+    # Kicking — from nflverse's separate "player_stats_kicking" file.
+    "Kicking Points":              "kicking_points",
+    "FG Made":                     "fg_made",
+    "Field Goals Made":            "fg_made",
+    "Extra Points Made":           "pat_made",
+    "PAT Made":                    "pat_made",
+    # Defense — from nflverse's separate "player_stats_def" file.
+    "Sacks":                       "def_sacks",
+    "Tackles":                     "def_tackles_total",
+    "Tackles + Assists":           "def_tackles_total",
+    "Solo Tackles":                "def_tackles_solo",
+    "Tackles For Loss":            "def_tackles_for_loss",
+    "Defensive Interceptions":     "def_interceptions",
+    # Anytime TD Scorer is P(rush_rec_tds >= 1) off the same rate used for
+    # "Rush + Rec TDs" — a different platform market on the same underlying
+    # column is fine, dedupe below keys on (platform, player, stat_type), not
+    # on the resolved internal column.
+    "Anytime TD Scorer":           "rush_rec_tds",
+    "Anytime TD":                  "rush_rec_tds",
 }
 
 # Deliberately unmodeled — add here (not left to fall into unknown_stat_types)
 # so a skip reads as "decided," same convention as mlb-bet's UNMODELED_STATS.
 UNMODELED_STATS = {
-    "Sacks",                                             # defensive player prop; no defensive stats pulled
-    "First TD Scorer", "Anytime TD Scorer",               # anytime/first-scorer market, not a numeric line
+    "First TD Scorer",                                     # needs drive-order/game-flow modeling, not a per-game rate
     "1H Rush + Rec TDs", "1Q Rush + Rec TDs",              # partial-game props need in-game TD-timing, not built
     "1H Pass Yards", "1H Rush Yards", "1H Receiving Yards",
-    "Kicking Points", "FG Made", "Extra Points Made",      # separate nflverse "kicking" release, not integrated
-    "Tackles", "Tackles + Assists", "Solo Tackles",        # defensive player props
     "Longest Reception", "Longest Rush", "Longest Completion",  # extreme-value stat, not a per-game-rate model
 }
 
 POISSON_STATS = {"passing_tds", "interceptions", "rushing_tds", "receiving_tds",
-                  "receptions", "completions", "rush_rec_tds"}
+                  "receptions", "completions", "rush_rec_tds",
+                  "fg_made", "pat_made", "def_sacks", "def_tackles_solo",
+                  "def_tackles_total", "def_tackles_for_loss", "def_interceptions"}
 NORMAL_STATS  = {"passing_yards", "rushing_yards", "receiving_yards",
-                  "rush_rec_yards", "pass_rush_yards", "total_yards", "fantasy"}
+                  "rush_rec_yards", "pass_rush_yards", "total_yards", "fantasy",
+                  "kicking_points"}
 
 PASS_DEFENSE_STATS = {"passing_yards", "passing_tds", "interceptions", "completions",
                        "receiving_yards", "receiving_tds", "receptions"}
 RUSH_DEFENSE_STATS = {"rushing_yards", "rushing_tds"}
 # Everything else modeled (rush_rec_yards, rush_rec_tds, pass_rush_yards, total_yards,
 # fantasy) is a combo of both game phases — blend pass and rush defense adjustment.
+
+# Defensive-player props need the OPPONENT'S OFFENSE's vulnerability, not the
+# opponent's defense — a pass rusher's sack total depends on how leaky the
+# other team's O-line is, which is the inverse of everything above.
+SACK_ADJUSTED_STATS = {"def_sacks"}
+# Tackles/kicking get no dedicated opponent adjustment (deliberate — see
+# CLAUDE.md): tackle volume already tracks the pace factor below (more plays
+# run against you = more tackle chances), and a kicker's volume is driven by
+# their own offense's red-zone efficiency, not the opponent's defense rating.
 
 PACE_APPLIED_STATS = POISSON_STATS | NORMAL_STATS
 
@@ -104,6 +133,12 @@ def derive_prop_columns(df: pd.DataFrame) -> pd.DataFrame:
         + df["receiving_yards"].fillna(0) * 0.1 + df["receiving_tds"].fillna(0) * 6
         + df["receptions"].fillna(0) * 1.0
     )
+    if "fg_made" in df.columns:
+        # Standard scoring (3/FG, 1/PAT) — actual platform "Kicking Points"
+        # rules sometimes weight FGs by distance; treated as an approximation.
+        df["kicking_points"] = df["fg_made"].fillna(0) * 3 + df["pat_made"].fillna(0)
+    if "def_tackles_solo" in df.columns:
+        df["def_tackles_total"] = df["def_tackles_solo"].fillna(0) + df["def_tackle_assists"].fillna(0)
     df["_name_key"] = df["player_name"].map(normalize_name)
     return df
 
@@ -177,18 +212,29 @@ def prob_over_line(expected: float, line: float, stat_col: str, std: float | Non
     return float(1 - norm.cdf(line, loc=expected, scale=max(expected * 0.35, 2.0)))
 
 
+# Combo offensive stats get a blended pass+rush defense adjustment.
+BLEND_DEFENSE_STATS = {"rush_rec_yards", "rush_rec_tds", "pass_rush_yards", "total_yards", "fantasy"}
+
+
 def _stat_def_adjustment(stat_col: str, opp_team: str, game_logs_df=None):
-    """Returns (multiplier, epa_for_explain, split_label)."""
+    """Returns (multiplier, epa_for_explain, split_label). split_label is
+    None when the stat gets no opponent adjustment at all (kicking, tackles —
+    see SACK_ADJUSTED_STATS's comment above for why)."""
+    if stat_col in SACK_ADJUSTED_STATS:
+        sacks_allowed = get_opp_sacks_allowed(opp_team, game_logs_df=game_logs_df)
+        return get_sacks_def_adj(sacks_allowed), sacks_allowed, "sacks_allowed"
     if stat_col in PASS_DEFENSE_STATS:
         epa = get_opp_def_epa(opp_team, "pass", game_logs_df=game_logs_df)
         return get_def_adj(epa), epa, "pass"
     if stat_col in RUSH_DEFENSE_STATS:
         epa = get_opp_def_epa(opp_team, "rush", game_logs_df=game_logs_df)
         return get_def_adj(epa), epa, "rush"
-    pass_epa = get_opp_def_epa(opp_team, "pass", game_logs_df=game_logs_df)
-    rush_epa = get_opp_def_epa(opp_team, "rush", game_logs_df=game_logs_df)
-    blended = (get_def_adj(pass_epa) + get_def_adj(rush_epa)) / 2
-    return blended, {"pass": pass_epa, "rush": rush_epa}, "blend"
+    if stat_col in BLEND_DEFENSE_STATS:
+        pass_epa = get_opp_def_epa(opp_team, "pass", game_logs_df=game_logs_df)
+        rush_epa = get_opp_def_epa(opp_team, "rush", game_logs_df=game_logs_df)
+        blended = (get_def_adj(pass_epa) + get_def_adj(rush_epa)) / 2
+        return blended, {"pass": pass_epa, "rush": rush_epa}, "blend"
+    return 1.0, None, None
 
 
 def _build_team_opponent_map(games: list[dict]) -> dict[str, str]:

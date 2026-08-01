@@ -13,6 +13,7 @@ from utils.db import get_conn
 from pipeline.team_names import to_abbr
 
 LEAGUE_AVG_PLAYS = 63.5   # approx NFL offensive plays per team per game
+LEAGUE_AVG_SACKS_ALLOWED = 2.3   # approx NFL sacks allowed per team per game
 RECENT_N = 8
 
 
@@ -70,6 +71,27 @@ def get_game_pace_factor(team: str, opponent: str, game_logs_df: pd.DataFrame | 
     team_pace = get_team_plays_pg(team, game_logs_df=game_logs_df) / LEAGUE_AVG_PLAYS
     opp_pace = get_team_plays_pg(opponent, game_logs_df=game_logs_df) / LEAGUE_AVG_PLAYS
     return round((team_pace + opp_pace) / 2, 4)
+
+
+def get_opp_sacks_allowed(opp_team: str, n: int = RECENT_N, game_logs_df: pd.DataFrame | None = None) -> float | None:
+    """Opponent's sacks-allowed rate (from their OFFENSE's pass protection) —
+    the opponent-adjustment axis for defensive Sacks props, since a pass
+    rusher's expected sacks depends on how leaky the opposing line is, not
+    how good the rusher's OWN defense is overall."""
+    rows = _team_rows(opp_team, n, game_logs_df)
+    if rows.empty or "off_sacks_allowed" not in rows.columns or rows["off_sacks_allowed"].isna().all():
+        return None
+    return round(float(rows["off_sacks_allowed"].mean()), 3)
+
+
+def get_sacks_def_adj(opp_sacks_allowed: float | None) -> float:
+    """Opponent's sacks-allowed rate -> a multiplier on a pass rusher's
+    expected sacks this game. Dampened to a +/-30% swing (sacks are high-
+    variance and a good pass rusher isn't purely a function of matchup)."""
+    if opp_sacks_allowed is None:
+        return 1.0
+    adj = 1.0 + 0.6 * ((opp_sacks_allowed - LEAGUE_AVG_SACKS_ALLOWED) / LEAGUE_AVG_SACKS_ALLOWED)
+    return float(max(0.70, min(1.30, adj)))
 
 
 def get_rest_days(team: str, game_logs_df: pd.DataFrame | None = None) -> float:
