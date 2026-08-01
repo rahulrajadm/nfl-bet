@@ -63,6 +63,22 @@ def to_full_name(team: str) -> str:
     return TEAM_ABBR_TO_NAME.get(team.upper(), "")
 
 
+NFL_DIVISIONS = {
+    "BUF": "AFC East", "MIA": "AFC East", "NE": "AFC East", "NYJ": "AFC East",
+    "BAL": "AFC North", "CIN": "AFC North", "CLE": "AFC North", "PIT": "AFC North",
+    "HOU": "AFC South", "IND": "AFC South", "JAX": "AFC South", "TEN": "AFC South",
+    "DEN": "AFC West", "KC": "AFC West", "LV": "AFC West", "LAC": "AFC West",
+    "DAL": "NFC East", "NYG": "NFC East", "PHI": "NFC East", "WAS": "NFC East",
+    "CHI": "NFC North", "DET": "NFC North", "GB": "NFC North", "MIN": "NFC North",
+    "ATL": "NFC South", "CAR": "NFC South", "NO": "NFC South", "TB": "NFC South",
+    "ARI": "NFC West", "LA": "NFC West", "SF": "NFC West", "SEA": "NFC West",
+}
+
+
+def is_div_game(home_abbr: str, away_abbr: str) -> bool:
+    return bool(home_abbr) and bool(away_abbr) and NFL_DIVISIONS.get(home_abbr) == NFL_DIVISIONS.get(away_abbr)
+
+
 def to_abbr(team: str) -> str:
     """Full name or abbreviation → canonical (nflverse) abbreviation. Input echoed if unknown."""
     if not team:
