@@ -32,7 +32,7 @@ Sibling project to [wnba-bet](https://github.com/rahulrajadm/wnba-bet) and [mlb-
 
 ## Status
 
-Build in progress — see `plan.md` for phase-by-phase status.
+All 6 build phases complete (see `plan.md`) and validated against real live data — schedule, odds, PrizePicks/Underdog props, injuries, weather, a full nflverse historical pull, a trained game model, and both Streamlit apps driven end-to-end in a real browser (zero console errors). **Not yet deployed to Streamlit Community Cloud** — that step needs a one-time manual connect (see below), Streamlit Cloud has no API for it.
 
 ---
 
@@ -41,8 +41,8 @@ Build in progress — see `plan.md` for phase-by-phase status.
 ```bash
 pip install -r requirements.txt
 cp .env.example .env              # add ODDS_API_KEY
-python pipeline/historical.py     # pull historical seasons into data/nfl_bet.db
-python models/train.py            # train + save models to data/models/
+python pipeline/historical.py     # pull historical seasons into data/nfl_bet.db (~5-10 min, mostly play-by-play)
+python models/train.py            # train + save models to data/models/ (already committed — this retrains)
 
 # Weekly local run
 ./start.sh
@@ -50,6 +50,20 @@ python models/train.py            # train + save models to data/models/
 # Run the local dashboard directly
 streamlit run ui/app.py
 ```
+
+---
+
+## Deploying to Streamlit Community Cloud (one-time, manual)
+
+1. Go to [share.streamlit.io](https://share.streamlit.io), sign in with the GitHub account that owns this repo.
+2. **New app** → repo `rahulrajadm/nfl-bet`, branch `main`, main file path `ui/app_cloud.py`.
+3. Under **Advanced settings → Secrets**, paste:
+   ```toml
+   REFRESH_CODE = "pick a 4-digit code"
+   ```
+   (`ODDS_API_KEY` is optional there too — without it the cloud app's game markets show model-only projections, same as local without a key.)
+4. Deploy. First load will show "No data loaded" until you enter the passcode and hit **Refresh All Data** in the sidebar (costs ~3 Odds API credits).
+5. If the app name doesn't land on `nfl-bet.streamlit.app`, update the URL in `.github/workflows/keep-alive.yml` to match.
 
 ---
 

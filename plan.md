@@ -163,38 +163,38 @@ nfl-bet-app/
 - [x] Repo structure, `.gitignore`, `LICENSE`, `.streamlit/`, `.github/workflows/keep-alive.yml`, `requirements.txt`/`requirements-local.txt`
 
 ### Phase 1 — Data Pipeline
-- [ ] `utils/db.py` — SQLite schema: games, team_stats, player_stats, odds, prop_lines, picks (with `week`, `season_type`)
-- [ ] `utils/names.py`, `utils/dates.py`, `utils/team_names.py`
-- [ ] `pipeline/historical.py` — multi-season NFL game logs + player stats + play-by-play EPA via `nfl_data_py`
-- [ ] `pipeline/schedule.py` — this week's NFL schedule from ESPN API
-- [ ] `pipeline/injuries.py` — practice reports + inactives
-- [ ] `pipeline/weather.py` — outdoor stadium wind/precip
-- [ ] `pipeline/odds.py` — live ML, spread, totals from Odds API
-- [ ] `pipeline/prizepicks.py` — live NFL prop lines
-- [ ] `pipeline/underdog.py` — live NFL prop lines
+- [x] `utils/db.py` — SQLite schema: games, team_stats, player_stats, odds, prop_lines, picks (with `week`, `season_type`)
+- [x] `utils/names.py`, `utils/dates.py`, `utils/team_names.py`
+- [x] `pipeline/historical.py` — multi-season NFL game logs + player stats + play-by-play EPA via `nfl_data_py`
+- [x] `pipeline/schedule.py` — this week's NFL schedule from Odds API + ESPN fallback
+- [x] `pipeline/injuries.py` — practice reports + inactives (ESPN)
+- [x] `pipeline/weather.py` — outdoor stadium wind/precip (open-meteo)
+- [x] `pipeline/odds.py` — live ML, spread, totals from Odds API
+- [x] `pipeline/prizepicks.py` — live NFL prop lines
+- [x] `pipeline/underdog.py` — live NFL prop lines
 
 ### Phase 2 — Game Models (primary focus)
-- [ ] `models/train.py` — feature engineering: EPA-based team ratings, rest, weather, QB-out flag, H2H
-- [ ] `models/game.py` — train spread, totals XGBoost models with holdout calibration; serialize to disk
+- [x] `models/train.py` — feature engineering: EPA-based team ratings, rest, div-game, QB-out flag
+- [x] `models/game.py` — trained spread/totals XGBoost models with holdout calibration; win prob derived from spread
 
 ### Phase 3 — Props Model
-- [ ] `models/props.py` — per-player season + recent-form rates; hybrid normal/Poisson probability vs. line
-- [ ] Opponent pass/rush defense adjustment
-- [ ] Pace/plays-per-game adjustment
+- [x] `models/props.py` — per-player season + recent-form rates; hybrid normal/Poisson probability vs. line
+- [x] Opponent pass/rush defense adjustment
+- [x] Pace/plays-per-game adjustment
 
 ### Phase 4 — Analysis Engine
-- [ ] `analysis/ev.py`, `confidence.py`, `risk.py`, `kelly.py` — ported from wnba-bet
-- [ ] `analysis/tracking.py`, `backtest.py`, `explain.py` — ported from wnba-bet
-- [ ] `picks/engine.py` — assemble + rank all picks; market anchoring; tag best platform
+- [x] `analysis/ev.py`, `confidence.py`, `risk.py`, `kelly.py` — ported from wnba-bet
+- [x] `analysis/tracking.py`, `backtest.py`, `explain.py` — ported from wnba-bet
+- [x] `picks/engine.py` — assemble + rank all picks; market anchoring; tag best platform
 
 ### Phase 5 — UI
-- [ ] `ui/app.py` — local Streamlit: Game Predictions, Player Props, Top Picks, Bankroll, Platform Comparison
-- [ ] `ui/app_cloud.py` — cloud version with passcode refresh + timestamp
+- [x] `ui/app.py` — local Streamlit: Game Predictions, Player Props, Top Picks, Bankroll, Platform Comparison, Ask Why
+- [x] `ui/app_cloud.py` — cloud version with passcode refresh + timestamp; game/player logs via nflverse (not ESPN — needs real EPA)
 
 ### Phase 6 — Deploy
-- [ ] GitHub repo `nfl-bet` (public)
-- [ ] Streamlit Cloud deployment
-- [ ] Live smoke test through preseason weeks
+- [x] GitHub repo `nfl-bet` (public) — pushed continuously through every phase
+- [ ] Streamlit Cloud deployment — **manual step required**: Streamlit Community Cloud has no API/CLI for creating a new app; see README.md's "Deploying to Streamlit Community Cloud" section for the one-time connect steps
+- [x] Pipeline validated end-to-end against real live data at every phase (not just import-checked) — see CLAUDE.md's caveats sections for specifics; live smoke test through the remaining preseason weeks still applies once deployed
 
 ---
 
