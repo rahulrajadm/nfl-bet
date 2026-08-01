@@ -47,7 +47,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 # leaving stale project modules in sys.modules -- the sibling of the .pyc
 # problem above, and one the .pyc sweep can't fix. If the already-loaded
 # shared code predates what this file needs, purge it all and re-import fresh.
-_REQUIRED_SCHEMA = 1
+_REQUIRED_SCHEMA = 2
 import analysis.explain as _explain_probe
 if getattr(_explain_probe, "SCHEMA_VERSION", 0) < _REQUIRED_SCHEMA:
     for _name in [n for n in list(sys.modules)
