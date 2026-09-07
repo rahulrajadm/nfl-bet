@@ -8,7 +8,7 @@ import requests
 from datetime import datetime, timezone
 from utils.db import get_conn, ensure_schema
 
-UNDERDOG_URL = "https://api.underdogfantasy.com/beta/v5/over_under_lines"
+UNDERDOG_URL = "https://api.underdogfantasy.com/v1/over_under_lines"  # beta/v5 deprecated 2026-09, returns 426
 HEADERS      = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 
 # Underdog's sport_id string for NFL games — unverified against a live call
