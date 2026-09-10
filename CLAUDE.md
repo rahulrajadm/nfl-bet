@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ML-driven NFL betting tool: XGBoost game models (spread/totals, moneyline derived from spread) + a hybrid normal/Poisson player-props model, compared against live odds and pick'em lines to surface +EV picks with confidence tiers and Kelly stakes. Sibling project to `wnba-bet` (same architecture — game-first, hybrid props distribution) and `mlb-bet` (props-first, pure Poisson); a few utilities (`utils/names.py`, `utils/dates.py`, `utils/team_names.py`) are ported from `mlb-bet` instead, since NFL player names carry suffixes and NFL games span timezones the way MLB's late games do. See `plan.md` for the full rationale and build order.
 
-**Status: build complete (all 6 phases), not yet deployed.** Everything below reflects real, browser-tested behavior, not aspiration. The only remaining step is connecting the repo on Streamlit Community Cloud, which has no API — see README.md's Deploying section for the one-time manual steps.
+**Status: build complete (all 6 phases), live on Streamlit Community Cloud at [bet-nfl.streamlit.app](https://bet-nfl.streamlit.app).** Everything below reflects real, browser-tested behavior, not aspiration. See README.md's "Deployed to Streamlit Community Cloud" section for the setup steps that were used.
 
 ## Commands
 

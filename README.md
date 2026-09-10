@@ -32,7 +32,7 @@ Sibling project to [wnba-bet](https://github.com/rahulrajadm/wnba-bet) and [mlb-
 
 ## Status
 
-All 6 build phases complete (see `plan.md`) and validated against real live data — schedule, odds, PrizePicks/Underdog props, injuries, weather, a full nflverse historical pull, a trained game model, and both Streamlit apps driven end-to-end in a real browser (zero console errors). **Not yet deployed to Streamlit Community Cloud** — that step needs a one-time manual connect (see below), Streamlit Cloud has no API for it.
+All 6 build phases complete (see `plan.md`) and validated against real live data — schedule, odds, PrizePicks/Underdog props, injuries, weather, a full nflverse historical pull, a trained game model, and both Streamlit apps driven end-to-end in a real browser (zero console errors). **Live on Streamlit Community Cloud** — see [Live Demo](#live-demo) above.
 
 ---
 
@@ -53,17 +53,19 @@ streamlit run ui/app.py
 
 ---
 
-## Deploying to Streamlit Community Cloud (one-time, manual)
+## Deployed to Streamlit Community Cloud
 
-1. Go to [share.streamlit.io](https://share.streamlit.io), sign in with the GitHub account that owns this repo.
+Already live at [bet-nfl.streamlit.app](https://bet-nfl.streamlit.app) (repo `rahulrajadm/nfl-bet`, main file `ui/app_cloud.py`). For reference, these were the one-time manual setup steps:
+
+1. [share.streamlit.io](https://share.streamlit.io) → sign in with the GitHub account that owns the repo.
 2. **New app** → repo `rahulrajadm/nfl-bet`, branch `main`, main file path `ui/app_cloud.py`.
-3. Under **Advanced settings → Secrets**, paste:
+3. Under **Advanced settings → Secrets**:
    ```toml
    REFRESH_CODE = "pick a 4-digit code"
    ```
    (`ODDS_API_KEY` is optional there too — without it the cloud app's game markets show model-only projections, same as local without a key.)
-4. Deploy. First load will show "No data loaded" until you enter the passcode and hit **Refresh All Data** in the sidebar (costs ~3 Odds API credits).
-5. If the app name doesn't land on `nfl-bet.streamlit.app`, update the URL in `.github/workflows/keep-alive.yml` to match.
+4. On first load, enter the passcode and hit **Refresh All Data** in the sidebar (costs ~3 Odds API credits) to populate data.
+5. If the app name ever moves off `bet-nfl.streamlit.app`, update the URL in `.github/workflows/keep-alive.yml` to match.
 
 ---
 
